@@ -10,6 +10,7 @@ import {
   PriceType
 } from "@/lib/supabase";
 import MarketRow from "@/components/MarketRow";
+import MarketDeleteModal from "@/components/MarketDeleteModal";
 
 const yen = (n: number) =>
   new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(n);
@@ -83,6 +84,7 @@ export default function MarketTab() {
   const [maxTurnover, setMaxTurnover] = useState<number | null>(null);
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
   const [showAllTags, setShowAllTags] = useState(false);  // タグクラウド全展開
+  const [selectedWatch, setSelectedWatch] = useState<Watch | null>(null);  // 詳細モーダル
 
   // タグ絞り込みは Supabase 側でフィルタするので、tags も dependency に
   useEffect(() => {
@@ -464,9 +466,22 @@ export default function MarketTab() {
               q1Threshold={q1}
               activeTags={activeTags}
               onTagClick={toggleTag}
+              onClick={setSelectedWatch}
             />
           ))}
         </section>
+      )}
+
+      {/* 詳細・削除モーダル */}
+      {selectedWatch && (
+        <MarketDeleteModal
+          watch={selectedWatch}
+          onClose={() => setSelectedWatch(null)}
+          onDeleted={(id) => {
+            setResults(prev => prev.filter(w => w.id !== id));
+            setSelectedWatch(null);
+          }}
+        />
       )}
     </>
   );
