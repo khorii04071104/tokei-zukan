@@ -9,6 +9,7 @@ import {
   MarketFilter,
   PriceType
 } from "@/lib/supabase";
+import { TAG_CATEGORIES } from "@/lib/tagVocabulary";
 import MarketRow from "@/components/MarketRow";
 import MarketDeleteModal from "@/components/MarketDeleteModal";
 
@@ -30,20 +31,7 @@ const TURNOVER_OPTIONS: { label: string; maxDays: number | null }[] = [
   { label: "90日以内",     maxDays: 90  }
 ];
 
-// タグカテゴリ (UIで分類表示するため)
-// AIプロンプトで使った語彙と一致させる
-const TAG_CATEGORIES: { label: string; tags: string[] }[] = [
-  { label: "サイズ",      tags: ["14cm","15cm","16cm","17cm","18cm","19cm","20cm","21cm"] },
-  { label: "性別",        tags: ["メンズ","レディース","ユニセックス"] },
-  { label: "ムーブメント", tags: ["手巻き","自動巻き","クォーツ","ソーラー","電波"] },
-  { label: "風防",        tags: ["プラスチック風防","クリスタル風防","サファイア風防","ミネラルガラス"] },
-  { label: "ケース素材",  tags: ["18K無垢","14K無垢","750無垢","GP金メッキ","GF金張り","GEP電気メッキ","GR金張り","ステンレス","チタン","プラチナ"] },
-  { label: "文字盤色",    tags: ["白文字盤","黒文字盤","青文字盤","緑文字盤","シルバー文字盤","ゴールド文字盤","ベッコウ柄","オパール文字盤","パール文字盤","赤文字盤"] },
-  { label: "デザイン",    tags: ["ラインストーン","デイデイト","ブレスウォッチ","ギザギザベゼル","ペンダントウォッチ","コインウォッチ","リングウォッチ","スケルトン","ダイヤ装飾"] },
-  { label: "状態",        tags: ["新品","美品","良品","並品","ジャンク"] },
-  { label: "付属品",      tags: ["フルセット","箱あり","保証書あり","余りコマあり","取説あり","箱なし","保証書なし"] },
-  { label: "時代",        tags: ["ヴィンテージ","アンティーク","モダン"] }
-];
+// タグカテゴリは共通定義 (lib/tagVocabulary.ts) を使用
 
 function MarketStatCard({
   label, value, subtext, highlight = false

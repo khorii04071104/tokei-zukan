@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Watch, deleteWatch, updateWatch } from "@/lib/supabase";
-import { TAG_CATEGORIES, ALL_TAGS } from "@/lib/tagVocabulary";
+import { Watch, WatchUpdate, deleteWatch, updateWatch } from "@/lib/supabase";
+import { TAG_CATEGORIES } from "@/lib/tagVocabulary";
 
 const yen = (n: number) =>
   new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(n);
@@ -90,8 +90,15 @@ export default function MarketDeleteModal({ watch, onClose, onDeleted, onUpdated
     setSaving(true);
     try {
       // updateWatch の WatchUpdate 型に合わせる
-      const patch: Record<string, string | null> = { [field]: value };
-      const updated = await updateWatch(watch.id, patch as never);
+      const patch: WatchUpdate = {};
+      if (field === "model_name" && value !== null) {
+        patch.model_name = value;
+      } else if (field === "ref_number") {
+        patch.ref_number = value;
+      } else if (field === "model_name_normalized") {
+        patch.model_name_normalized = value;
+      }
+      const updated = await updateWatch(watch.id, patch);
       if (onUpdated) onUpdated(updated);
       return true;
     } catch (e: unknown) {

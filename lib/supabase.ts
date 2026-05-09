@@ -68,6 +68,8 @@ export type WatchUpdate = Partial<
     | "channel"
     | "sold_date"
     | "memo"
+    | "model_name"
+    | "ref_number"
     | "model_name_normalized"
     | "tags"
   >
