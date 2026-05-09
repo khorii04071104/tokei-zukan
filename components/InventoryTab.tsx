@@ -1,0 +1,199 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { fetchInventoryWatches, calcProfit, Watch } from "@/lib/supabase";
+import WatchCard from "@/components/WatchCard";
+import WatchEditModal from "@/components/WatchEditModal";
+
+const yen = (n: number) =>
+  new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(n);
+
+function StatCard({
+  label,
+  value,
+  subtext
+}: {
+  label: string;
+  value: string;
+  subtext?: string;
+}) {
+  return (
+    <div className="
+      relative overflow-hidden rounded-xl
+      bg-gradient-to-br from-zinc-900 to-black
+      border border-zinc-800
+      p-5
+    ">
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/60 to-transparent" />
+      <p className="text-[10px] uppercase tracking-[0.25em] text-amber-500/70 mb-2">
+        {label}
+      </p>
+      <p className="font-serif text-3xl text-amber-50 tracking-tight">{value}</p>
+      {subtext && <p className="text-xs text-zinc-500 mt-1 font-mono">{subtext}</p>}
+    </div>
+  );
+}
+
+export default function InventoryTab() {
+  const [watches, setWatches] = useState<Watch[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState<string | null>(null);
+  const [query, setQuery]     = useState("");
+  const [filterStatus, setFilterStatus] = useState<"all" | "stock" | "sold">("all");
+  const [editingWatch, setEditingWatch] = useState<Watch | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        const data = await fetchInventoryWatches();  // ← inventory のみ
+        setWatches(data);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return watches.filter((w) => {
+      if (filterStatus === "stock" && w.sale_price != null) return false;
+      if (filterStatus === "sold"  && w.sale_price == null) return false;
+      if (!q) return true;
+      const hay = [w.brand, w.model_name, w.ref_number ?? ""]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [watches, query, filterStatus]);
+
+  const stats = useMemo(() => {
+    const total = watches.length;
+    const inStock = watches.filter((w) => w.sale_price == null).length;
+    const sold    = watches.filter((w) => w.sale_price != null);
+
+    const totalProfit = sold.reduce((sum, w) => sum + (calcProfit(w) ?? 0), 0);
+    const avgRate =
+      sold.length > 0
+        ? sold.reduce((sum, w) => {
+            const p = calcProfit(w);
+            return sum + (p != null && w.sale_price ? p / w.sale_price : 0);
+          }, 0) / sold.length
+        : 0;
+
+    return { total, inStock, sold: sold.length, totalProfit, avgRate };
+  }, [watches]);
+
+  function handleSaved(updated: Watch) {
+    setWatches((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+  }
+  function handleDeleted(id: string) {
+    setWatches((prev) => prev.filter((w) => w.id !== id));
+  }
+
+  return (
+    <>
+      {/* KPIカード */}
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <StatCard
+          label="総在庫数"
+          value={`${stats.inStock}`}
+          subtext={`(累計 ${stats.total} 本 / 売却済 ${stats.sold} 本)`}
+        />
+        <StatCard
+          label="確定 総利益"
+          value={yen(stats.totalProfit)}
+          subtext="売却済みベース"
+        />
+        <StatCard
+          label="平均利益率"
+          value={`${(stats.avgRate * 100).toFixed(1)}%`}
+          subtext="売却済みベース"
+        />
+      </section>
+
+      {/* 検索 + フィルタ */}
+      <section className="mb-6 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="ブランド名・モデル名・型番で検索..."
+            className="
+              w-full px-4 py-3 pr-10
+              bg-zinc-900/60 border border-zinc-800 rounded-lg
+              text-zinc-100 placeholder:text-zinc-600
+              focus:outline-none focus:border-amber-500/50 focus:bg-zinc-900
+              transition-colors
+            "
+          />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 text-sm">
+            ⌕
+          </span>
+        </div>
+
+        <div className="flex gap-1 bg-zinc-900/60 border border-zinc-800 rounded-lg p-1">
+          {(["all", "stock", "sold"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilterStatus(s)}
+              className={`
+                px-4 py-2 text-xs uppercase tracking-wider rounded-md transition-colors
+                ${
+                  filterStatus === s
+                    ? "bg-amber-500/15 text-amber-300"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }
+              `}
+            >
+              {s === "all" ? "All" : s === "stock" ? "In Stock" : "Sold"}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <p className="text-xs text-zinc-500 mb-4 font-mono">
+        {filtered.length} / {watches.length} 件 ・ カードをクリックで編集
+      </p>
+
+      {loading && (
+        <div className="text-center py-20 text-zinc-500">読み込み中...</div>
+      )}
+
+      {error && !loading && (
+        <div className="rounded-lg bg-rose-950/40 border border-rose-900 text-rose-200 px-5 py-4">
+          <p className="text-sm font-bold mb-1">エラー</p>
+          <p className="text-xs font-mono">{error}</p>
+        </div>
+      )}
+
+      {!loading && !error && filtered.length === 0 && (
+        <div className="text-center py-20 text-zinc-500">
+          <p className="font-serif text-2xl mb-2 text-zinc-400">⌚</p>
+          <p>該当する時計が見つかりませんでした</p>
+        </div>
+      )}
+
+      {!loading && !error && filtered.length > 0 && (
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          {filtered.map((w) => (
+            <WatchCard key={w.id} watch={w} onClick={setEditingWatch} />
+          ))}
+        </section>
+      )}
+
+      {editingWatch && (
+        <WatchEditModal
+          watch={editingWatch}
+          onClose={() => setEditingWatch(null)}
+          onSaved={handleSaved}
+          onDeleted={handleDeleted}
+        />
+      )}
+    </>
+  );
+}

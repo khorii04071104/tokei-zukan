@@ -7,7 +7,6 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  // eslint-disable-next-line no-console
   console.error(
     "[supabase] NEXT_PUBLIC_SUPABASE_URL もしくは NEXT_PUBLIC_SUPABASE_ANON_KEY が未設定です"
   );
@@ -23,9 +22,12 @@ export const supabase: SupabaseClient = createClient(
 // 型定義
 // ============================================
 export type RarityRank = "SS" | "A" | "B" | "C";
+export type RecordType = "inventory" | "market";
+export type PriceType  = "sold" | "buyback";
 
 export type Watch = {
   id: string;
+  record_type: RecordType;
   brand: string;
   model_name: string;
   ref_number: string | null;
@@ -40,6 +42,10 @@ export type Watch = {
   rarity_rank: RarityRank | null;
   memo: string | null;
   image_url: string | null;
+  // 相場用 (record_type='market'時に意味を持つ)
+  price_type: PriceType | null;
+  source_url: string | null;
+  surveyed_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -58,24 +64,109 @@ export type WatchUpdate = Partial<
   >
 >;
 
+// 相場集計の結果型 (market_medianビュー)
+export type MarketMedian = {
+  brand: string;
+  ref_number: string | null;
+  price_type: PriceType | null;
+  channel: string | null;
+  total_count: number;
+  median_all: number;
+  mean_all: number;
+  median_filtered: number;
+  filtered_count: number;
+  min_price: number;
+  max_price: number;
+  last_surveyed_at: string | null;
+};
+
+// 相場検索フィルタ
+export type MarketFilter = {
+  query?: string;
+  channel?: string;
+  priceType?: PriceType | "";
+  daysAgo?: number;  // 「過去N日」、0または未指定で全期間
+};
+
 // ============================================
-// 取得
+// データ取得
 // ============================================
-export async function fetchWatches(): Promise<Watch[]> {
+
+// 仕入れデータのみ
+export async function fetchInventoryWatches(): Promise<Watch[]> {
   const { data, error } = await supabase
     .from("watches")
     .select("*")
+    .eq("record_type", "inventory")
     .order("stock_date", { ascending: false });
 
   if (error) {
-    console.error("[supabase] fetchWatches error:", error);
+    console.error("[supabase] fetchInventoryWatches error:", error);
     throw error;
   }
   return (data ?? []) as Watch[];
 }
 
+// 相場データの検索
+export async function fetchMarketWatches(filter: MarketFilter = {}): Promise<Watch[]> {
+  let q = supabase
+    .from("watches")
+    .select("*")
+    .eq("record_type", "market");
+
+  // チャネル絞り込み
+  if (filter.channel) {
+    q = q.eq("channel", filter.channel);
+  }
+
+  // 価格タイプ絞り込み
+  if (filter.priceType) {
+    q = q.eq("price_type", filter.priceType);
+  }
+
+  // 期間絞り込み
+  if (filter.daysAgo && filter.daysAgo > 0) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - filter.daysAgo);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    q = q.gte("surveyed_at", cutoffStr);
+  }
+
+  // キーワード検索 (brand / model_name / ref_number に対するOR検索)
+  if (filter.query && filter.query.trim() !== "") {
+    const term = filter.query.trim();
+    // PostgRESTのor構文 (※カンマでフィールドを区切る)
+    // ilike は大文字小文字を無視する LIKE
+    q = q.or(
+      `brand.ilike.%${term}%,model_name.ilike.%${term}%,ref_number.ilike.%${term}%`
+    );
+  }
+
+  const { data, error } = await q.order("surveyed_at", { ascending: false, nullsFirst: false });
+
+  if (error) {
+    console.error("[supabase] fetchMarketWatches error:", error);
+    throw error;
+  }
+  return (data ?? []) as Watch[];
+}
+
+// 中央値ビューの取得
+export async function fetchMarketMedian(): Promise<MarketMedian[]> {
+  const { data, error } = await supabase
+    .from("market_median")
+    .select("*")
+    .order("total_count", { ascending: false });
+
+  if (error) {
+    console.error("[supabase] fetchMarketMedian error:", error);
+    throw error;
+  }
+  return (data ?? []) as MarketMedian[];
+}
+
 // ============================================
-// 更新
+// 更新・削除
 // ============================================
 export async function updateWatch(id: string, patch: WatchUpdate): Promise<Watch> {
   const { data, error } = await supabase
@@ -92,9 +183,6 @@ export async function updateWatch(id: string, patch: WatchUpdate): Promise<Watch
   return data as Watch;
 }
 
-// ============================================
-// 削除
-// ============================================
 export async function deleteWatch(id: string): Promise<void> {
   const { error } = await supabase.from("watches").delete().eq("id", id);
   if (error) {
@@ -104,13 +192,11 @@ export async function deleteWatch(id: string): Promise<void> {
 }
 
 // ============================================
-// 利益計算
+// 利益計算 (仕入れ用)
 // ============================================
-
-// チャネル別の手数料率
 const CHANNEL_FEE_RATE: Record<string, number> = {
   メルカリ: 0.10,
-  ヤフオク: 0.088,    // 8.8%
+  ヤフオク: 0.088,
   楽天ラクマ: 0.10,
   PayPayフリマ: 0.05,
   ebay: 0.13,
@@ -136,13 +222,58 @@ export function calcProfitRate(w: Watch): number | null {
   return profit / w.sale_price;
 }
 
-// 利用可能なチャネル一覧 (UI用)
+// ============================================
+// 統計ユーティリティ (相場用)
+// ============================================
+export function calcStats(values: number[]) {
+  if (values.length === 0) {
+    return { count: 0, median: 0, mean: 0, min: 0, max: 0, medianFiltered: 0, filteredCount: 0 };
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const count = sorted.length;
+  const sum = sorted.reduce((s, v) => s + v, 0);
+
+  // 中央値
+  const median =
+    count % 2 === 0
+      ? (sorted[count / 2 - 1] + sorted[count / 2]) / 2
+      : sorted[Math.floor(count / 2)];
+
+  // 第1四分位数 (Q1)
+  const q1Index = Math.floor(count * 0.25);
+  const q1 = sorted[q1Index];
+
+  // Q1未満を除外した中央値
+  const filtered = sorted.filter(v => v >= q1);
+  const fc = filtered.length;
+  const medianFiltered =
+    fc === 0 ? 0
+    : fc % 2 === 0
+      ? (filtered[fc / 2 - 1] + filtered[fc / 2]) / 2
+      : filtered[Math.floor(fc / 2)];
+
+  return {
+    count,
+    median,
+    mean: sum / count,
+    min: sorted[0],
+    max: sorted[count - 1],
+    medianFiltered,
+    filteredCount: fc
+  };
+}
+
+// チャネル一覧
 export const CHANNELS = [
   "メルカリ",
   "ヤフオク",
+  "楽天",
   "楽天ラクマ",
   "PayPayフリマ",
   "ebay",
+  "セカンドストリート",
+  "質屋_買取",
+  "業者_買取",
   "店頭",
   "その他"
 ] as const;
