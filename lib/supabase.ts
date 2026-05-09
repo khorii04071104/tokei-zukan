@@ -30,6 +30,7 @@ export type Watch = {
   record_type: RecordType;
   brand: string;
   model_name: string;
+  model_name_normalized: string | null;  // AI生成の正規化ID (集計キー用)
   ref_number: string | null;
   purchase_price: number;
   battery_cost: number;
@@ -67,6 +68,8 @@ export type WatchUpdate = Partial<
     | "channel"
     | "sold_date"
     | "memo"
+    | "model_name_normalized"
+    | "tags"
   >
 >;
 

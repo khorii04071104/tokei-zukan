@@ -481,6 +481,10 @@ export default function MarketTab() {
             setResults(prev => prev.filter(w => w.id !== id));
             setSelectedWatch(null);
           }}
+          onUpdated={(updated) => {
+            setResults(prev => prev.map(w => w.id === updated.id ? updated : w));
+            setSelectedWatch(updated);
+          }}
         />
       )}
     </>
