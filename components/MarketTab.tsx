@@ -22,12 +22,26 @@ const PERIOD_OPTIONS: { label: string; days: number }[] = [
   { label: "全期間", days: 0 }
 ];
 
-// 回転率フィルタ: 何日以内で売れた商品か
 const TURNOVER_OPTIONS: { label: string; maxDays: number | null }[] = [
   { label: "すべて",       maxDays: null },
   { label: "7日以内 ⚡",   maxDays: 7   },
   { label: "30日以内",     maxDays: 30  },
   { label: "90日以内",     maxDays: 90  }
+];
+
+// タグカテゴリ (UIで分類表示するため)
+// AIプロンプトで使った語彙と一致させる
+const TAG_CATEGORIES: { label: string; tags: string[] }[] = [
+  { label: "サイズ",      tags: ["14cm","15cm","16cm","17cm","18cm","19cm","20cm","21cm"] },
+  { label: "性別",        tags: ["メンズ","レディース","ユニセックス"] },
+  { label: "ムーブメント", tags: ["手巻き","自動巻き","クォーツ","ソーラー","電波"] },
+  { label: "風防",        tags: ["プラスチック風防","クリスタル風防","サファイア風防","ミネラルガラス"] },
+  { label: "ケース素材",  tags: ["18K無垢","14K無垢","750無垢","GP金メッキ","GF金張り","GEP電気メッキ","GR金張り","ステンレス","チタン","プラチナ"] },
+  { label: "文字盤色",    tags: ["白文字盤","黒文字盤","青文字盤","緑文字盤","シルバー文字盤","ゴールド文字盤","ベッコウ柄","オパール文字盤","パール文字盤","赤文字盤"] },
+  { label: "デザイン",    tags: ["ラインストーン","デイデイト","ブレスウォッチ","ギザギザベゼル","ペンダントウォッチ","コインウォッチ","リングウォッチ","スケルトン","ダイヤ装飾"] },
+  { label: "状態",        tags: ["新品","美品","良品","並品","ジャンク"] },
+  { label: "付属品",      tags: ["フルセット","箱あり","保証書あり","余りコマあり","取説あり","箱なし","保証書なし"] },
+  { label: "時代",        tags: ["ヴィンテージ","アンティーク","モダン"] }
 ];
 
 function MarketStatCard({
@@ -62,19 +76,22 @@ export default function MarketTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
 
-  // フィルタ状態
   const [query, setQuery]         = useState("");
   const [channel, setChannel]     = useState<string>("");
   const [priceType, setPriceType] = useState<PriceType | "">("");
   const [daysAgo, setDaysAgo]     = useState<number>(90);
   const [maxTurnover, setMaxTurnover] = useState<number | null>(null);
+  const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
+  const [showAllTags, setShowAllTags] = useState(false);  // タグクラウド全展開
 
+  // タグ絞り込みは Supabase 側でフィルタするので、tags も dependency に
   useEffect(() => {
     const filter: MarketFilter = {
       query,
       channel: channel || undefined,
       priceType: priceType || undefined,
-      daysAgo
+      daysAgo,
+      tags: activeTags.size > 0 ? [...activeTags] : undefined
     };
 
     let canceled = false;
@@ -93,18 +110,36 @@ export default function MarketTab() {
     })();
 
     return () => { canceled = true; };
-  }, [query, channel, priceType, daysAgo]);
+  }, [query, channel, priceType, daysAgo, activeTags]);
 
-  // 回転率フィルタはクライアントサイドで適用 (days_to_sell が null の行は除外)
+  // 回転率フィルタはクライアントサイドで適用
   const filtered = useMemo(() => {
     if (maxTurnover == null) return results;
     return results.filter(w => w.days_to_sell != null && w.days_to_sell <= maxTurnover);
   }, [results, maxTurnover]);
 
+  // 結果データに含まれるタグの頻度カウント (タグクラウド用)
+  const tagFrequency = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const w of filtered) {
+      const tags = w.tags || [];
+      for (const t of tags) {
+        counts[t] = (counts[t] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [filtered]);
+
+  // 頻出タグTOP10 (タグクラウドのデフォルト表示)
+  const topTags = useMemo(() => {
+    return Object.entries(tagFrequency)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([tag, count]) => ({ tag, count }));
+  }, [tagFrequency]);
+
   const stats = useMemo(() => {
-    const prices = filtered
-      .map(w => w.sale_price)
-      .filter((p): p is number => p != null);
+    const prices = filtered.map(w => w.sale_price).filter((p): p is number => p != null);
     return calcStats(prices);
   }, [filtered]);
 
@@ -115,7 +150,6 @@ export default function MarketTab() {
     return prices[q1Index];
   }, [filtered]);
 
-  // 回転率の平均 (フィルタ後の data_to_sell が取れているもののみ)
   const turnoverStats = useMemo(() => {
     const days = filtered.map(w => w.days_to_sell).filter((d): d is number => d != null);
     if (days.length === 0) return null;
@@ -132,13 +166,23 @@ export default function MarketTab() {
     };
   }, [filtered]);
 
-  const hasFilters = !!(query || channel || priceType || maxTurnover != null);
+  const hasFilters = !!(query || channel || priceType || maxTurnover != null || activeTags.size > 0);
+
+  // タグの ON/OFF
+  function toggleTag(tag: string) {
+    setActiveTags(prev => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }
 
   return (
     <>
       <p className="text-xs text-zinc-500 mb-6 font-mono leading-relaxed">
         ⌕ 相場データベースは、Chrome拡張機能で集めた成約価格・買取相場の調査記録です。
-        メルカリでは「出品から売却までの日数」も同時に取得され、回転率での絞り込みができます。
+        タグで絞り込めば「緑文字盤×フルセット」のような特定条件の中央値が見えます。
       </p>
 
       {/* 検索フィルタ */}
@@ -157,16 +201,12 @@ export default function MarketTab() {
               transition-colors
             "
           />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 text-sm">
-            ⌕
-          </span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 text-sm">⌕</span>
         </div>
 
         <div className="flex flex-wrap gap-3">
           <div className="flex-1 min-w-[140px]">
-            <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1.5">
-              調査元
-            </label>
+            <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1.5">調査元</label>
             <select
               value={channel}
               onChange={(e) => setChannel(e.target.value)}
@@ -178,9 +218,7 @@ export default function MarketTab() {
           </div>
 
           <div className="flex-1 min-w-[140px]">
-            <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1.5">
-              価格タイプ
-            </label>
+            <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1.5">価格タイプ</label>
             <select
               value={priceType}
               onChange={(e) => setPriceType(e.target.value as PriceType | "")}
@@ -193,11 +231,8 @@ export default function MarketTab() {
           </div>
         </div>
 
-        {/* 期間 */}
         <div>
-          <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1.5">
-            期間
-          </label>
+          <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1.5">期間</label>
           <div className="flex gap-1 bg-zinc-900/60 border border-zinc-800 rounded-md p-1">
             {PERIOD_OPTIONS.map(opt => (
               <button
@@ -206,9 +241,7 @@ export default function MarketTab() {
                 onClick={() => setDaysAgo(opt.days)}
                 className={`
                   flex-1 px-2 py-1.5 text-[11px] uppercase tracking-wider rounded transition-colors
-                  ${daysAgo === opt.days
-                    ? "bg-blue-500/15 text-blue-300"
-                    : "text-zinc-500 hover:text-zinc-300"}
+                  ${daysAgo === opt.days ? "bg-blue-500/15 text-blue-300" : "text-zinc-500 hover:text-zinc-300"}
                 `}
               >
                 {opt.label}
@@ -217,11 +250,8 @@ export default function MarketTab() {
           </div>
         </div>
 
-        {/* 回転率フィルタ */}
         <div>
-          <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1.5">
-            回転率 (出品から売却までの日数)
-          </label>
+          <label className="block text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1.5">回転率 (出品から売却までの日数)</label>
           <div className="flex gap-1 bg-zinc-900/60 border border-zinc-800 rounded-md p-1">
             {TURNOVER_OPTIONS.map(opt => (
               <button
@@ -230,9 +260,7 @@ export default function MarketTab() {
                 onClick={() => setMaxTurnover(opt.maxDays)}
                 className={`
                   flex-1 px-2 py-1.5 text-[11px] uppercase tracking-wider rounded transition-colors
-                  ${maxTurnover === opt.maxDays
-                    ? "bg-emerald-500/15 text-emerald-300"
-                    : "text-zinc-500 hover:text-zinc-300"}
+                  ${maxTurnover === opt.maxDays ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:text-zinc-300"}
                 `}
               >
                 {opt.label}
@@ -241,15 +269,132 @@ export default function MarketTab() {
           </div>
         </div>
 
+        {/* ===== タグクラウド & 絞り込み ===== */}
+        <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+              🏷️ タグで絞り込み
+              {activeTags.size > 0 && (
+                <span className="ml-2 text-blue-400">
+                  ({activeTags.size}個 選択中・AND検索)
+                </span>
+              )}
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowAllTags(v => !v)}
+              className="text-[10px] text-blue-400/80 hover:text-blue-300"
+            >
+              {showAllTags ? "▲ 閉じる" : "▼ 全タグ表示"}
+            </button>
+          </div>
+
+          {/* 選択中のタグ (常に最上段に表示) */}
+          {activeTags.size > 0 && (
+            <div className="flex flex-wrap gap-1.5 pb-2 border-b border-zinc-800">
+              {[...activeTags].map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTag(tag)}
+                  className="
+                    px-2.5 py-1 rounded-full text-[11px] font-medium
+                    bg-blue-500 text-zinc-950 border border-blue-400
+                    hover:bg-blue-400
+                    transition-colors
+                  "
+                >
+                  ✓ {tag} ✕
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* 頻出タグ (デフォルト表示) */}
+          {!showAllTags && (
+            <>
+              {topTags.length === 0 && activeTags.size === 0 ? (
+                <p className="text-[11px] text-zinc-600 italic">
+                  タグ付きデータがまだありません
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {topTags
+                    .filter(({ tag }) => !activeTags.has(tag))
+                    .map(({ tag, count }) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => toggleTag(tag)}
+                        className="
+                          px-2 py-0.5 rounded-full text-[11px]
+                          bg-zinc-800 text-zinc-300 border border-zinc-700
+                          hover:bg-blue-500/15 hover:border-blue-500/40 hover:text-blue-300
+                          transition-colors
+                        "
+                      >
+                        {tag}
+                        <span className="ml-1 text-zinc-500">·{count}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* 全タグ展開 (カテゴリ別) */}
+          {showAllTags && (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {TAG_CATEGORIES.map(cat => (
+                <div key={cat.label}>
+                  <p className="text-[9px] text-zinc-600 uppercase tracking-wider mb-1">
+                    {cat.label}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {cat.tags.map(tag => {
+                      const count = tagFrequency[tag] ?? 0;
+                      const isActive = activeTags.has(tag);
+                      const dim = count === 0 && !isActive;
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => toggleTag(tag)}
+                          disabled={dim}
+                          className={`
+                            px-2 py-0.5 rounded-full text-[10px]
+                            border transition-colors
+                            ${isActive
+                              ? "bg-blue-500 text-zinc-950 border-blue-400"
+                              : dim
+                                ? "bg-zinc-900/40 text-zinc-700 border-zinc-900 cursor-not-allowed"
+                                : "bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-blue-500/15 hover:border-blue-500/40 hover:text-blue-300"
+                            }
+                          `}
+                          title={count > 0 ? `${count}件` : "該当データなし"}
+                        >
+                          {tag}
+                          {count > 0 && <span className="ml-1 opacity-70">·{count}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {hasFilters && (
           <button
             type="button"
             onClick={() => {
-              setQuery(""); setChannel(""); setPriceType(""); setMaxTurnover(null);
+              setQuery(""); setChannel(""); setPriceType("");
+              setMaxTurnover(null); setActiveTags(new Set());
             }}
             className="text-xs text-zinc-500 hover:text-blue-300 transition-colors"
           >
-            ✕ フィルタをクリア
+            ✕ すべてのフィルタをクリア
           </button>
         )}
       </section>
@@ -265,7 +410,7 @@ export default function MarketTab() {
           <MarketStatCard
             label="中央値 (外れ値除外)"
             value={yen(Math.round(stats.medianFiltered))}
-            subtext="目利きの目安"
+            subtext={activeTags.size > 0 ? `タグ${activeTags.size}個で絞込み済み` : "目利きの目安"}
             highlight
           />
           <MarketStatCard
@@ -304,16 +449,22 @@ export default function MarketTab() {
         <div className="text-center py-20 text-zinc-500">
           <p className="font-serif text-2xl mb-2 text-zinc-400">📊</p>
           <p>該当する相場データが見つかりませんでした</p>
-          <p className="text-xs mt-2 text-zinc-600">
-            Chrome拡張機能で売り切れ済みの商品ページを記録すると、ここに集まります
-          </p>
+          {hasFilters && (
+            <p className="text-xs mt-2 text-zinc-600">フィルタを緩めると結果が出るかもしれません</p>
+          )}
         </div>
       )}
 
       {!loading && !error && filtered.length > 0 && (
         <section className="space-y-2">
           {filtered.map((w) => (
-            <MarketRow key={w.id} watch={w} q1Threshold={q1} />
+            <MarketRow
+              key={w.id}
+              watch={w}
+              q1Threshold={q1}
+              activeTags={activeTags}
+              onTagClick={toggleTag}
+            />
           ))}
         </section>
       )}

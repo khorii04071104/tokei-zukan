@@ -1,3 +1,5 @@
+"use client";
+
 import { Watch } from "@/lib/supabase";
 
 const yen = (n: number) =>
@@ -8,7 +10,6 @@ const PRICE_TYPE_LABELS: Record<string, string> = {
   buyback: "買取"
 };
 
-// 回転日数 → 色分け + ラベル
 function turnoverBadge(days: number | null) {
   if (days == null) return null;
   if (days <= 7)  return { label: `⚡ ${days}日で売却`,  color: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" };
@@ -17,7 +18,6 @@ function turnoverBadge(days: number | null) {
   return                 { label: `🐢 ${days}日で売却`,  color: "bg-rose-500/15 text-rose-400 border border-rose-500/30" };
 }
 
-// "○日以内" のフォールバック表示
 function soldWithinBadge(days: number | null) {
   if (days == null) return null;
   return { label: `〜${days}日以内`, color: "bg-zinc-800 text-zinc-400 border border-zinc-700" };
@@ -26,15 +26,29 @@ function soldWithinBadge(days: number | null) {
 type Props = {
   watch: Watch;
   q1Threshold?: number;
+  activeTags?: Set<string>;
+  onTagClick?: (tag: string) => void;
 };
 
-export default function MarketRow({ watch, q1Threshold = 0 }: Props) {
+export default function MarketRow({
+  watch,
+  q1Threshold = 0,
+  activeTags,
+  onTagClick
+}: Props) {
   const price = watch.sale_price ?? 0;
   const isOutlier = q1Threshold > 0 && price < q1Threshold;
   const priceTypeLabel = watch.price_type ? PRICE_TYPE_LABELS[watch.price_type] : "";
 
-  // 回転率バッジ (days_to_sell があれば優先、なければ sold_within_days)
   const turnover = turnoverBadge(watch.days_to_sell) || soldWithinBadge(watch.sold_within_days);
+  const tags = watch.tags || [];
+
+  // タグクリックで親に通知 (リンク遷移を抑制)
+  function handleTagClick(e: React.MouseEvent, tag: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    onTagClick?.(tag);
+  }
 
   return (
     <a
@@ -72,7 +86,7 @@ export default function MarketRow({ watch, q1Threshold = 0 }: Props) {
 
         {/* 情報 */}
         <div className="flex-1 min-w-0 flex flex-col justify-between">
-          {/* 上段: ブランド・モデル */}
+          {/* 上段 */}
           <div className="min-w-0">
             <div className="flex items-baseline gap-2">
               <h3 className="font-serif text-sm sm:text-base text-amber-50 truncate">
@@ -89,8 +103,8 @@ export default function MarketRow({ watch, q1Threshold = 0 }: Props) {
             </p>
           </div>
 
-          {/* 下段: メタ情報タグ */}
-          <div className="flex items-center gap-2 mt-1 flex-wrap text-[10px]">
+          {/* 下段: メタ情報 + タグ */}
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[10px]">
             {watch.channel && (
               <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">
                 {watch.channel}
@@ -106,7 +120,6 @@ export default function MarketRow({ watch, q1Threshold = 0 }: Props) {
                 {priceTypeLabel}
               </span>
             )}
-            {/* 回転日数バッジ */}
             {turnover && (
               <span className={`px-2 py-0.5 rounded font-mono ${turnover.color}`}>
                 {turnover.label}
@@ -118,10 +131,31 @@ export default function MarketRow({ watch, q1Threshold = 0 }: Props) {
               </span>
             )}
             {isOutlier && (
-              <span className="text-rose-400/80 font-mono">
-                ⚠ 安売り疑い
-              </span>
+              <span className="text-rose-400/80 font-mono">⚠ 安売り疑い</span>
             )}
+
+            {/* タグバッジ (クリックで絞り込みトグル) */}
+            {tags.length > 0 && tags.map(tag => {
+              const isActive = activeTags?.has(tag) ?? false;
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={(e) => handleTagClick(e, tag)}
+                  className={`
+                    px-2 py-0.5 rounded-full
+                    transition-colors
+                    ${isActive
+                      ? "bg-blue-500 text-zinc-950 border border-blue-400 font-medium"
+                      : "bg-blue-500/10 text-blue-300 border border-blue-500/30 hover:bg-blue-500/20 hover:border-blue-500/50"
+                    }
+                  `}
+                  title={isActive ? "クリックでフィルタ解除" : "クリックでこのタグでフィルタ"}
+                >
+                  {isActive && "✓ "}{tag}
+                </button>
+              );
+            })}
           </div>
         </div>
 

@@ -50,6 +50,8 @@ export type Watch = {
   listed_at: string | null;
   days_to_sell: number | null;
   sold_within_days: number | null;
+  // タグ (主に record_type='market' で使用)
+  tags: string[];
   created_at: string;
   updated_at: string;
 };
@@ -90,6 +92,7 @@ export type MarketFilter = {
   channel?: string;
   priceType?: PriceType | "";
   daysAgo?: number;  // 「過去N日」、0または未指定で全期間
+  tags?: string[];   // 全タグを含むレコードのみ (AND条件)
 };
 
 // ============================================
@@ -144,6 +147,12 @@ export async function fetchMarketWatches(filter: MarketFilter = {}): Promise<Wat
     q = q.or(
       `brand.ilike.%${term}%,model_name.ilike.%${term}%,ref_number.ilike.%${term}%`
     );
+  }
+
+  // タグ絞り込み (全タグを含むレコードのみ = AND条件)
+  // PostgreSQLの array contains 演算子: tags @> {緑文字盤,フルセット}
+  if (filter.tags && filter.tags.length > 0) {
+    q = q.contains("tags", filter.tags);
   }
 
   const { data, error } = await q.order("surveyed_at", { ascending: false, nullsFirst: false });
