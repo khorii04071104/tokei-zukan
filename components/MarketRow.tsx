@@ -8,15 +8,33 @@ const PRICE_TYPE_LABELS: Record<string, string> = {
   buyback: "買取"
 };
 
+// 回転日数 → 色分け + ラベル
+function turnoverBadge(days: number | null) {
+  if (days == null) return null;
+  if (days <= 7)  return { label: `⚡ ${days}日で売却`,  color: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" };
+  if (days <= 30) return { label: `${days}日で売却`,    color: "bg-amber-500/15 text-amber-300 border border-amber-500/30" };
+  if (days <= 90) return { label: `△ ${days}日で売却`,  color: "bg-orange-500/15 text-orange-300 border border-orange-500/30" };
+  return                 { label: `🐢 ${days}日で売却`,  color: "bg-rose-500/15 text-rose-400 border border-rose-500/30" };
+}
+
+// "○日以内" のフォールバック表示
+function soldWithinBadge(days: number | null) {
+  if (days == null) return null;
+  return { label: `〜${days}日以内`, color: "bg-zinc-800 text-zinc-400 border border-zinc-700" };
+}
+
 type Props = {
   watch: Watch;
-  q1Threshold?: number;  // この値未満は外れ値疑い
+  q1Threshold?: number;
 };
 
 export default function MarketRow({ watch, q1Threshold = 0 }: Props) {
   const price = watch.sale_price ?? 0;
   const isOutlier = q1Threshold > 0 && price < q1Threshold;
   const priceTypeLabel = watch.price_type ? PRICE_TYPE_LABELS[watch.price_type] : "";
+
+  // 回転率バッジ (days_to_sell があれば優先、なければ sold_within_days)
+  const turnover = turnoverBadge(watch.days_to_sell) || soldWithinBadge(watch.sold_within_days);
 
   return (
     <a
@@ -71,7 +89,7 @@ export default function MarketRow({ watch, q1Threshold = 0 }: Props) {
             </p>
           </div>
 
-          {/* 下段: メタ情報 */}
+          {/* 下段: メタ情報タグ */}
           <div className="flex items-center gap-2 mt-1 flex-wrap text-[10px]">
             {watch.channel && (
               <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">
@@ -86,6 +104,12 @@ export default function MarketRow({ watch, q1Threshold = 0 }: Props) {
                   : "bg-amber-500/15 text-amber-300"}
               `}>
                 {priceTypeLabel}
+              </span>
+            )}
+            {/* 回転日数バッジ */}
+            {turnover && (
+              <span className={`px-2 py-0.5 rounded font-mono ${turnover.color}`}>
+                {turnover.label}
               </span>
             )}
             {watch.surveyed_at && (

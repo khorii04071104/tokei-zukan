@@ -46,6 +46,10 @@ export type Watch = {
   price_type: PriceType | null;
   source_url: string | null;
   surveyed_at: string | null;
+  // 回転率データ (メルカリ等から取得、null許容)
+  listed_at: string | null;
+  days_to_sell: number | null;
+  sold_within_days: number | null;
   created_at: string;
   updated_at: string;
 };
