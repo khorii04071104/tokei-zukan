@@ -2,14 +2,11 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 // ============================================
 // Supabase クライアント
-// 環境変数から接続情報を読み込む
 // ============================================
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  // ビルド時/起動時に気付けるようにエラーを出す
-  // (本番でも env が無いと動かないので明示的に落とす)
   // eslint-disable-next-line no-console
   console.error(
     "[supabase] NEXT_PUBLIC_SUPABASE_URL もしくは NEXT_PUBLIC_SUPABASE_ANON_KEY が未設定です"
@@ -19,13 +16,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export const supabase: SupabaseClient = createClient(
   supabaseUrl,
   supabaseAnonKey,
-  {
-    auth: { persistSession: false }
-  }
+  { auth: { persistSession: false } }
 );
 
 // ============================================
-// 型定義 - watches テーブルの行
+// 型定義
 // ============================================
 export type RarityRank = "SS" | "A" | "B" | "C";
 
@@ -40,16 +35,31 @@ export type Watch = {
   shipping_fee: number;
   sale_price: number | null;
   channel: string | null;
-  stock_date: string;        // YYYY-MM-DD
+  stock_date: string;
   sold_date: string | null;
   rarity_rank: RarityRank | null;
   memo: string | null;
+  image_url: string | null;
   created_at: string;
   updated_at: string;
 };
 
+// 編集モーダルから渡される更新可能フィールド
+export type WatchUpdate = Partial<
+  Pick<
+    Watch,
+    | "purchase_price"
+    | "battery_cost"
+    | "shipping_fee"
+    | "sale_price"
+    | "channel"
+    | "sold_date"
+    | "memo"
+  >
+>;
+
 // ============================================
-// データ取得
+// 取得
 // ============================================
 export async function fetchWatches(): Promise<Watch[]> {
   const { data, error } = await supabase
@@ -58,7 +68,6 @@ export async function fetchWatches(): Promise<Watch[]> {
     .order("stock_date", { ascending: false });
 
   if (error) {
-    // eslint-disable-next-line no-console
     console.error("[supabase] fetchWatches error:", error);
     throw error;
   }
@@ -66,12 +75,57 @@ export async function fetchWatches(): Promise<Watch[]> {
 }
 
 // ============================================
-// ユーティリティ - 利益計算
-// 利益 = 販売価格 - 仕入価格 - 電池代 - 送料 - 決済手数料(10%目安)
+// 更新
 // ============================================
+export async function updateWatch(id: string, patch: WatchUpdate): Promise<Watch> {
+  const { data, error } = await supabase
+    .from("watches")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[supabase] updateWatch error:", error);
+    throw error;
+  }
+  return data as Watch;
+}
+
+// ============================================
+// 削除
+// ============================================
+export async function deleteWatch(id: string): Promise<void> {
+  const { error } = await supabase.from("watches").delete().eq("id", id);
+  if (error) {
+    console.error("[supabase] deleteWatch error:", error);
+    throw error;
+  }
+}
+
+// ============================================
+// 利益計算
+// ============================================
+
+// チャネル別の手数料率
+const CHANNEL_FEE_RATE: Record<string, number> = {
+  メルカリ: 0.10,
+  ヤフオク: 0.088,    // 8.8%
+  楽天ラクマ: 0.10,
+  PayPayフリマ: 0.05,
+  ebay: 0.13,
+  店頭: 0,
+  その他: 0.10
+};
+
+export function getFeeRate(channel: string | null): number {
+  if (!channel) return 0.10;
+  return CHANNEL_FEE_RATE[channel] ?? 0.10;
+}
+
 export function calcProfit(w: Watch): number | null {
   if (w.sale_price == null) return null;
-  const fee = Math.floor(w.sale_price * 0.1); // 10%手数料 (メルカリ想定)
+  const fee = Math.floor(w.sale_price * getFeeRate(w.channel));
   return w.sale_price - w.purchase_price - w.battery_cost - w.shipping_fee - fee;
 }
 
@@ -81,3 +135,14 @@ export function calcProfitRate(w: Watch): number | null {
   if (profit == null) return null;
   return profit / w.sale_price;
 }
+
+// 利用可能なチャネル一覧 (UI用)
+export const CHANNELS = [
+  "メルカリ",
+  "ヤフオク",
+  "楽天ラクマ",
+  "PayPayフリマ",
+  "ebay",
+  "店頭",
+  "その他"
+] as const;

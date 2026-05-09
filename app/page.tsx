@@ -3,16 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchWatches, calcProfit, Watch } from "@/lib/supabase";
 import WatchCard from "@/components/WatchCard";
+import WatchEditModal from "@/components/WatchEditModal";
 
-// ============================================
-// 円フォーマッタ
-// ============================================
 const yen = (n: number) =>
   new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(n);
 
-// ============================================
-// ダッシュボードのKPIカード
-// ============================================
 function StatCard({
   label,
   value,
@@ -39,9 +34,6 @@ function StatCard({
   );
 }
 
-// ============================================
-// メインページ
-// ============================================
 export default function Page() {
   const [watches, setWatches] = useState<Watch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,7 +41,9 @@ export default function Page() {
   const [query, setQuery]     = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | "stock" | "sold">("all");
 
-  // ---- データ取得 ----
+  // モーダルで編集中のwatch
+  const [editingWatch, setEditingWatch] = useState<Watch | null>(null);
+
   useEffect(() => {
     (async () => {
       try {
@@ -65,7 +59,6 @@ export default function Page() {
     })();
   }, []);
 
-  // ---- 検索 + フィルタ ----
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return watches.filter((w) => {
@@ -79,7 +72,6 @@ export default function Page() {
     });
   }, [watches, query, filterStatus]);
 
-  // ---- 集計 (フィルタ後ではなく全体ベース) ----
   const stats = useMemo(() => {
     const total = watches.length;
     const inStock = watches.filter((w) => w.sale_price == null).length;
@@ -97,13 +89,19 @@ export default function Page() {
     return { total, inStock, sold: sold.length, totalProfit, avgRate };
   }, [watches]);
 
+  // ---- モーダル経由のデータ更新 ----
+  function handleSaved(updated: Watch) {
+    setWatches((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+  }
+  function handleDeleted(id: string) {
+    setWatches((prev) => prev.filter((w) => w.id !== id));
+  }
+
   return (
     <main className="min-h-screen bg-black text-zinc-200">
-      {/* 背景の微妙なグラデーション */}
       <div className="fixed inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,rgba(212,165,116,0.08),transparent_50%)]" />
 
       <div className="max-w-7xl mx-auto px-6 py-10">
-        {/* ヘッダー */}
         <header className="mb-10 flex items-end justify-between border-b border-zinc-800 pb-6">
           <div>
             <p className="text-[11px] uppercase tracking-[0.3em] text-amber-500/80 mb-2">
@@ -114,11 +112,10 @@ export default function Page() {
             </h1>
           </div>
           <p className="hidden sm:block text-xs font-mono text-zinc-500">
-            Watch Zukan v1.0
+            Watch Zukan v1.1
           </p>
         </header>
 
-        {/* KPIカード */}
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
           <StatCard
             label="総在庫数"
@@ -126,7 +123,7 @@ export default function Page() {
             subtext={`(累計 ${stats.total} 本 / 売却済 ${stats.sold} 本)`}
           />
           <StatCard
-            label="見込 / 確定 総利益"
+            label="確定 総利益"
             value={yen(stats.totalProfit)}
             subtext="売却済みベース"
           />
@@ -137,7 +134,6 @@ export default function Page() {
           />
         </section>
 
-        {/* 検索 + フィルタ */}
         <section className="mb-8 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
           <div className="relative flex-1">
             <input
@@ -178,12 +174,10 @@ export default function Page() {
           </div>
         </section>
 
-        {/* 結果カウント */}
         <p className="text-xs text-zinc-500 mb-4 font-mono">
-          {filtered.length} / {watches.length} 件
+          {filtered.length} / {watches.length} 件 ・ カードをクリックで編集
         </p>
 
-        {/* 状態別の表示 */}
         {loading && (
           <div className="text-center py-20 text-zinc-500">読み込み中...</div>
         )}
@@ -202,20 +196,28 @@ export default function Page() {
           </div>
         )}
 
-        {/* グリッド */}
         {!loading && !error && filtered.length > 0 && (
           <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {filtered.map((w) => (
-              <WatchCard key={w.id} watch={w} />
+              <WatchCard key={w.id} watch={w} onClick={setEditingWatch} />
             ))}
           </section>
         )}
 
-        {/* フッター */}
         <footer className="mt-16 pt-6 border-t border-zinc-900 text-center text-xs text-zinc-600 font-mono">
           Personal Watch Catalog · powered by Supabase
         </footer>
       </div>
+
+      {/* 編集モーダル */}
+      {editingWatch && (
+        <WatchEditModal
+          watch={editingWatch}
+          onClose={() => setEditingWatch(null)}
+          onSaved={handleSaved}
+          onDeleted={handleDeleted}
+        />
+      )}
     </main>
   );
 }
