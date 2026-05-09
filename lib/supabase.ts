@@ -290,3 +290,89 @@ export const CHANNELS = [
   "店頭",
   "その他"
 ] as const;
+
+// ============================================
+// 目利きノート
+// ============================================
+export type Note = {
+  id: string;
+  title: string;
+  category: string | null;
+  body: string;
+  tags: string[];
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NoteUpsert = {
+  id?: string;
+  title: string;
+  category: string | null;
+  body: string;
+  tags: string[];
+  pinned: boolean;
+};
+
+export async function fetchNotes(): Promise<Note[]> {
+  const { data, error } = await supabase
+    .from("notes")
+    .select("*")
+    .order("pinned", { ascending: false })
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    console.error("[supabase] fetchNotes error:", error);
+    throw error;
+  }
+  return (data ?? []) as Note[];
+}
+
+export async function createNote(note: NoteUpsert): Promise<Note> {
+  const { data, error } = await supabase
+    .from("notes")
+    .insert({
+      title: note.title,
+      category: note.category,
+      body: note.body,
+      tags: note.tags,
+      pinned: note.pinned
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[supabase] createNote error:", error);
+    throw error;
+  }
+  return data as Note;
+}
+
+export async function updateNote(id: string, note: NoteUpsert): Promise<Note> {
+  const { data, error } = await supabase
+    .from("notes")
+    .update({
+      title: note.title,
+      category: note.category,
+      body: note.body,
+      tags: note.tags,
+      pinned: note.pinned
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[supabase] updateNote error:", error);
+    throw error;
+  }
+  return data as Note;
+}
+
+export async function deleteNote(id: string): Promise<void> {
+  const { error } = await supabase.from("notes").delete().eq("id", id);
+  if (error) {
+    console.error("[supabase] deleteNote error:", error);
+    throw error;
+  }
+}
